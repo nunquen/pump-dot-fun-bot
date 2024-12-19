@@ -13,6 +13,7 @@ from solana.rpc.async_api import AsyncClient
 from solana.transaction import Transaction
 from solana.rpc.commitment import Confirmed
 from solana.rpc.types import TxOpts
+from solana.exceptions import SolanaRpcException
 
 from solders.pubkey import Pubkey
 from solders.keypair import Keypair
@@ -53,7 +54,7 @@ async def trade(websocket=None, match_string=None, bro_address=None, marry_mode=
 
 async def _trade(websocket, match_string=None, bro_address=None, marry_mode=False, yolo_mode=False):
     while True:
-        print("Waiting for a new token creation...")
+        print("\nWaiting for a new token creation...")
         token_data = await listen_for_create_transaction(websocket)
         print("New token created:")
         print(json.dumps(token_data, indent=2))
@@ -98,6 +99,7 @@ async def _trade(websocket, match_string=None, bro_address=None, marry_mode=Fals
             log_trade("buy", token_data, token_price_sol, str(buy_tx_hash))
         else:
             print("Buy transaction failed.")
+            continue
 
         if not marry_mode:
             print("Waiting for 20 seconds before selling...")
@@ -117,19 +119,29 @@ async def _trade(websocket, match_string=None, bro_address=None, marry_mode=Fals
 
 async def main(yolo_mode=False, match_string=None, bro_address=None, marry_mode=False):
     if yolo_mode:
-        while True:
+        trades = 5
+        trades_counter = 0
+        exit_program = False
+        while not exit_program:
             try:
                 async with websockets.connect(WSS_ENDPOINT) as websocket:
-                    while True:
+                    while not exit_program:
                         try:
+                            trades_counter += 1
+                            if trades_counter >= trades:
+                                exit_program = True
+                                print("*** Exiting program as expected ***")
+                                continue
                             await trade(websocket, match_string, bro_address, marry_mode, yolo_mode)
                         except websockets.exceptions.ConnectionClosed:
                             print("WebSocket connection closed. Reconnecting...")
                             break
+                        except SolanaRpcException as solana_e:
+                            print("  Main: SolanaRpcException: {}".format(str(solana_e.error_msg)))
                         except Exception as e:
-                            print(f"An error occurred: {e}")
-                        print("Waiting for 5 seconds before looking for the next token...")
-                        await asyncio.sleep(5)
+                            print("An error occurred: {}".format(e))
+                        print("Waiting for 2 seconds before looking for the next token...")
+                        await asyncio.sleep(2)
             except Exception as e:
                 print(f"Connection error: {e}")
                 print("Reconnecting in 5 seconds...")

@@ -7,6 +7,7 @@ import hashlib
 import websockets
 import time
 
+from solana.exceptions import SolanaRpcException
 from solana.rpc.async_api import AsyncClient
 from solana.transaction import Transaction
 from solana.rpc.commitment import Confirmed
@@ -14,7 +15,9 @@ from solana.rpc.types import TxOpts
 
 from solders.pubkey import Pubkey
 from solders.keypair import Keypair
+from solders.commitment_config import CommitmentLevel
 from solders.instruction import Instruction, AccountMeta
+from solders.rpc.config import RpcSendTransactionConfig
 from solders.system_program import TransferParams, transfer
 from solders.transaction import VersionedTransaction
 
@@ -87,11 +90,29 @@ async def buy_token(mint: Pubkey, bonding_curve: Pubkey, associated_bonding_curv
                         owner=payer.pubkey(),
                         mint=mint
                     )
+
                     create_ata_tx = Transaction()
                     create_ata_tx.add(create_ata_ix)
                     recent_blockhash = await client.get_latest_blockhash()
                     create_ata_tx.recent_blockhash = recent_blockhash.value.blockhash
-                    await client.send_transaction(create_ata_tx, payer)
+
+                    # Sign the transaction
+                    create_ata_tx.sign(payer)
+                     # Debugging: Print transaction and serialize
+                    print(create_ata_tx)
+                    try:
+                        _ = create_ata_tx.serialize()
+                        print("Transaction serialized successfully.")
+                    except Exception as e:
+                        print(f"Serialization error: {e}")
+
+                    # Serialize the transaction
+                    serialized_tx = create_ata_tx.serialize()
+
+                    # Send the raw transaction
+                    tx_signature = await client.send_raw_transaction(serialized_tx)
+                    print(f"Transaction signature: {tx_signature}")
+                    # await client.send_transaction(create_ata_tx, payer)
                     print("Associated token account created.")
                     print(f"Associated token account address: {associated_token_account}")
                     break
@@ -99,14 +120,16 @@ async def buy_token(mint: Pubkey, bonding_curve: Pubkey, associated_bonding_curv
                     print("Associated token account already exists.")
                     print(f"Associated token account address: {associated_token_account}")
                     break
+            except SolanaRpcException as solana_e:
+                print("  buy_token - create associated account: SolanaRpcException: {}".format(solana_e.error_msg))
             except Exception as e:
-                print(f"Attempt {ata_attempt + 1} to create associated token account failed: {str(e)}")
+                print(f"  Attempt {ata_attempt + 1} to create associated token account failed: {str(e)}")
                 if ata_attempt < max_retries - 1:
                     wait_time = 2 ** ata_attempt
-                    print(f"Retrying in {wait_time} seconds...")
+                    print(f"  Retrying in {wait_time} seconds...")
                     await asyncio.sleep(wait_time)
                 else:
-                    print("Max retries reached. Unable to create associated token account.")
+                    print("  Max retries reached. Unable to create associated token account.")
                     return
 
         # Continue with the buy transaction
@@ -136,26 +159,40 @@ async def buy_token(mint: Pubkey, bonding_curve: Pubkey, associated_bonding_curv
                 transaction.add(buy_ix)
                 transaction.recent_blockhash = recent_blockhash.value.blockhash
 
-                tx = await client.send_transaction(
-                    transaction,
-                    payer,
-                    opts=TxOpts(skip_preflight=True, preflight_commitment=Confirmed),
+                # Sign the transaction
+                transaction.sign(payer)
+                serialized_tx = transaction.serialize()
+                config = RpcSendTransactionConfig(
+                    preflight_commitment=CommitmentLevel.Confirmed,
+                    skip_preflight=True
                 )
+                tx = await client.send_raw_transaction(
+                    serialized_tx,
+                    opts=TxOpts(skip_preflight=True, preflight_commitment=Confirmed)    
+                )
+
+                # tx = await client.send_transaction(
+                #     transaction,
+                #     payer,
+                #     opts=TxOpts(skip_preflight=True, preflight_commitment=Confirmed),
+                # )
 
                 print(f"Transaction sent: https://explorer.solana.com/tx/{tx.value}")
 
                 await client.confirm_transaction(tx.value, commitment="confirmed")
-                print("Transaction confirmed")
+                print("  Transaction confirmed")
                 return tx.value
 
+            except SolanaRpcException as solana_err:
+                print("  buy_token - Send Transaction: SolanaRpcException exception: {}".format(solana_err.error_msg))
             except Exception as e:
-                print(f"Attempt {attempt + 1} failed: {str(e)}")
+                print(f"  Attempt {attempt + 1} failed: {str(e)}")
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
-                    print(f"Retrying in {wait_time} seconds...")
+                    print(f"  Retrying in {wait_time} seconds...")
                     await asyncio.sleep(wait_time)
                 else:
-                    print("Max retries reached. Unable to complete the transaction.")
+                    print("  Max retries reached. Unable to complete the transaction.")
 
 def load_idl(file_path):
     with open(file_path, 'r') as f:
@@ -211,6 +248,7 @@ async def listen_for_create_transaction(websocket):
 
     ping_interval = 20
     last_ping_time = time.time()
+    program_validator_print = False
 
     while True:
         try:
@@ -234,7 +272,8 @@ async def listen_for_create_transaction(websocket):
                                     transaction = VersionedTransaction.from_bytes(tx_data_decoded)
                                     
                                     for ix in transaction.message.instructions:
-                                        if str(transaction.message.account_keys[ix.program_id_index]) == str(PUMP_PROGRAM):
+                                        program_id = str(transaction.message.account_keys[ix.program_id_index])
+                                        if  program_id == str(PUMP_PROGRAM):
                                             ix_data = bytes(ix.data)
                                             discriminator = struct.unpack('<Q', ix_data[:8])[0]
                                             
@@ -243,6 +282,10 @@ async def listen_for_create_transaction(websocket):
                                                 account_keys = [str(transaction.message.account_keys[index]) for index in ix.accounts]
                                                 decoded_args = decode_create_instruction(ix_data, create_ix, account_keys)
                                                 return decoded_args
+                                        else:
+                                            if not program_validator_print:
+                                                print("listen_for_create_transaction-> this is not a PUMP_PROGRAM ID: {}".format(program_id))
+                                                program_validator_print = True
         except asyncio.TimeoutError:
             print("No data received for 30 seconds, sending ping...")
             await websocket.ping()
@@ -250,28 +293,3 @@ async def listen_for_create_transaction(websocket):
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed. Reconnecting...")
             raise
-
-async def main(yolo_mode=False):
-    if yolo_mode:
-        while True:
-            try:
-                async with websockets.connect(WSS_ENDPOINT) as websocket:
-                    while True:
-                        try:
-                            await trade(websocket)
-                        except websockets.exceptions.ConnectionClosed:
-                            print("WebSocket connection closed. Reconnecting...")
-                            break
-                        except Exception as e:
-                            print(f"An error occurred: {e}")
-                        print("Waiting for 5 seconds before looking for the next token...")
-                        await asyncio.sleep(5)
-            except Exception as e:
-                print(f"Connection error: {e}")
-                print("Reconnecting in 5 seconds...")
-                await asyncio.sleep(5)
-    else:
-        await trade()
-
-if __name__ == "__main__":
-    asyncio.run(main())
