@@ -7,6 +7,8 @@ import hashlib
 import websockets
 import time
 
+from construct import Struct, Int64ul, Flag
+
 from solana.exceptions import SolanaRpcException
 from solana.rpc.async_api import AsyncClient
 from solana.transaction import Transaction
@@ -25,8 +27,9 @@ from spl.token.instructions import get_associated_token_address
 import spl.token.instructions as spl_token
 
 from config import *
+from lib.utils import get_latest_blockhash
 
-from construct import Struct, Int64ul, Flag
+
 
 # Here and later all the discriminators are precalculated. See learning-examples/discriminator.py
 EXPECTED_DISCRIMINATOR = struct.pack("<Q", 6966180631402821399)
@@ -93,7 +96,7 @@ async def buy_token(mint: Pubkey, bonding_curve: Pubkey, associated_bonding_curv
 
                     create_ata_tx = Transaction()
                     create_ata_tx.add(create_ata_ix)
-                    recent_blockhash = await client.get_latest_blockhash()
+                    recent_blockhash = await get_latest_blockhash()
                     create_ata_tx.recent_blockhash = recent_blockhash.value.blockhash
 
                     # Sign the transaction
@@ -154,7 +157,7 @@ async def buy_token(mint: Pubkey, bonding_curve: Pubkey, associated_bonding_curv
                 data = discriminator + struct.pack("<Q", int(token_amount * 10**6)) + struct.pack("<Q", max_amount_lamports)
                 buy_ix = Instruction(PUMP_PROGRAM, data, accounts)
 
-                recent_blockhash = await client.get_latest_blockhash()
+                recent_blockhash = await get_latest_blockhash()
                 transaction = Transaction()
                 transaction.add(buy_ix)
                 transaction.recent_blockhash = recent_blockhash.value.blockhash
@@ -177,10 +180,10 @@ async def buy_token(mint: Pubkey, bonding_curve: Pubkey, associated_bonding_curv
                 #     opts=TxOpts(skip_preflight=True, preflight_commitment=Confirmed),
                 # )
 
-                print(f"Transaction sent: https://explorer.solana.com/tx/{tx.value}")
+                print(f"Transaction sent: https://solscan.io/tx/{tx.value}")
 
-                await client.confirm_transaction(tx.value, commitment="confirmed")
-                print("  Transaction confirmed")
+                # await client.confirm_transaction(tx.value, commitment="confirmed")
+                # print("  Transaction confirmed")
                 return tx.value
 
             except SolanaRpcException as solana_err:

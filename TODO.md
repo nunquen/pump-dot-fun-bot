@@ -1,5 +1,8 @@
 TODO:
-- Check this exception:
-  SolanaRpcException: <class 'httpx.HTTPStatusError'> raised in "GetAccountInfo" endpoint request
+- Refactor: work with VersionedTRansactions
+  . create associated token GetAccountInfo
+  . send transaction
 
- Validate that transactions are confirmed: buy_token -> line 182
+- Check this exception:
+  * SolanaRpcException: <class 'httpx.HTTPStatusError'> raised in "GetAccountInfo" endpoint request
+  * GetLatestBlockhash -> ask directly to solana 

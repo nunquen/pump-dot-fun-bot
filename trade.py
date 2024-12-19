@@ -25,12 +25,15 @@ from spl.token.instructions import get_associated_token_address
 import spl.token.instructions as spl_token
 
 from config import *
+from lib.utils import get_latest_blockhash
+
 
 # Import functions from buy.py
 from buy import get_pump_curve_state, calculate_pump_curve_price, buy_token, listen_for_create_transaction
 
 # Import functions from sell.py
 from sell import sell_token
+
 
 def log_trade(action, token_data, price, tx_hash):
     os.makedirs("trades", exist_ok=True)
